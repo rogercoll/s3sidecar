@@ -1,6 +1,7 @@
 package s3sidecar
 
 import (
+	"log"
 	"os"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 
 type S3Sidecar struct {
 	interval time.Duration
-	region   string
+	sess     *session.Session
 	bucket   string
 	key      string
 	//working Directory
@@ -24,46 +25,48 @@ type S3Sidecar struct {
 func NewS3Sidecar(_interval time.Duration, region, bucket, key, workingDirectory, updatesDirectory string) (*S3Sidecar, error) {
 	// Initialize a session in us-west-2 that the SDK will use to load
 	// credentials from the shared credentials file ~/.aws/credentials.
-	_, err := session.NewSession(&aws.Config{
+	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region)},
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &S3Sidecar{_interval, region, bucket, key, workingDirectory, updatesDirectory}, nil
+	return &S3Sidecar{_interval, sess, bucket, key, workingDirectory, updatesDirectory}, nil
 }
 
-func (s *S3Sidecar) downloadFile(sess *session.Session) error {
-	file, err := os.Create(s.wDirectory + s.key)
+func (s *S3Sidecar) downloadFile() error {
+	file, err := os.Create(s.wDirectory + "/" + s.key)
 	if err != nil {
 		return err
 	}
-	downloader := s3manager.NewDownloader(sess)
+	downloader := s3manager.NewDownloader(s.sess)
 	_, err = downloader.Download(file,
 		&s3.GetObjectInput{
 			Bucket: aws.String(s.bucket),
 			Key:    aws.String(s.key),
 		})
+	log.Println("File downloaded from S3")
 	return err
 }
 
-func (s *S3Sidecar) uploadFile(sess *session.Session) error {
-	file, err := os.Open(s.uDirectory + s.key)
+func (s *S3Sidecar) uploadFile() error {
+	file, err := os.Open(s.uDirectory + "/" + s.key)
 	if err != nil {
 		return err
 	}
-	uploader := s3manager.NewUploader(sess)
+	uploader := s3manager.NewUploader(s.sess)
 	_, err = uploader.Upload(
 		&s3manager.UploadInput{
 			Bucket: aws.String(s.bucket),
 			Key:    aws.String(s.key),
 			Body:   file,
 		})
+	log.Println("File uploaded to S3")
 	return err
 }
 
-func (s *S3Sidecar) hasChanges(sess *session.Session, lastLocal time.Time) (bool, *time.Time, error) {
-	svc := s3.New(sess, &aws.Config{
+func (s *S3Sidecar) hasChanges(lastLocal time.Time) (bool, *time.Time, error) {
+	svc := s3.New(s.sess, &aws.Config{
 		DisableRestProtocolURICleaning: aws.Bool(true),
 	})
 	out, err := svc.ListObjectsV2(&s3.ListObjectsV2Input{
@@ -81,7 +84,7 @@ func (s *S3Sidecar) hasChanges(sess *session.Session, lastLocal time.Time) (bool
 }
 
 func (s *S3Sidecar) localUpdate(lastLocal time.Time) (bool, error) {
-	fileInfo, err := os.Stat(s.uDirectory + s.key)
+	fileInfo, err := os.Stat(s.uDirectory + "/" + s.key)
 	if err == nil {
 		if lastLocal.Before(fileInfo.ModTime()) {
 			return true, nil
@@ -101,32 +104,25 @@ func (s *S3Sidecar) Start(done <-chan interface{}) <-chan error {
 		for {
 			select {
 			case <-ticker.C:
-				sess, err := session.NewSession(&aws.Config{
-					Region: aws.String(s.region)},
-				)
-				if err != nil {
-					errors <- err
-					break
-				}
 				pushFile, err := s.localUpdate(lastLocal)
 				if err != nil {
 					errors <- err
 					break
 				}
 				if pushFile {
-					err := s.uploadFile(sess)
+					err := s.uploadFile()
 					if err != nil {
 						errors <- err
 						break
 					}
 				}
-				update, lastRemote, err := s.hasChanges(sess, lastLocal)
+				update, lastRemote, err := s.hasChanges(lastLocal)
 				if err != nil {
 					errors <- err
 					break
 				}
 				if update {
-					err := s.downloadFile(sess)
+					err := s.downloadFile()
 					if err != nil {
 						errors <- err
 						break
