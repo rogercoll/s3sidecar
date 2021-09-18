@@ -30,15 +30,11 @@ func main() {
 	if !ok {
 		log.Fatal("W_DIR is not present")
 	}
-	udir, ok := os.LookupEnv("U_DIR")
-	if !ok {
-		log.Fatal("U_DIR is not present")
-	}
 	iinterval, err := strconv.Atoi(interval)
 	if err != nil {
 		log.Fatal(err)
 	}
-	s, err := s3sidecar.NewS3Sidecar(time.Duration(int64(iinterval)), region, bucket, object, wdir, udir)
+	s, err := s3sidecar.NewS3Sidecar(time.Duration(int64(iinterval)), region, bucket, object, wdir)
 	if err != nil {
 		log.Fatal(err)
 	}

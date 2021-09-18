@@ -10,5 +10,8 @@ help: ## This help.
 build: ## Build the container
 	docker build -t $(APP_NAME) .
 
+build-multi: ## Build the container for multi platform
+	docker buildx build --platform linux/arm/v6,linux/amd64 -t coll97/s3sidecar:latest . --push
+
 deploy: ## Build the container
 	docker-compose up -d 
